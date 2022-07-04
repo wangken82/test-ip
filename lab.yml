@@ -1,0 +1,107 @@
+- name: Create lab environment
+  hosts: localhost
+  connection: local
+  tasks:
+  - name: Generate SSH keys
+    openssh_keypair:
+      path: ~/.ssh/lab_rsa
+  - name: Copy SSH config to localhost
+    copy:
+      src: ssh.config/ssh.config
+      dest: ~/.ssh/config
+  - name: Get my public IP
+    ipify_facts:
+      timeout: 20
+    delegate_to: localhost
+    register: cloudshell_public_ip
+  - name: output
+    debug: msg="my cloudshell public ip is {{ ipify_public_ip }}"
+  - name: Terraform apply -var 'cloudshell_public_ip=["{{ipify_public_ip}}/32"]'
+    terraform:
+      lock: no
+      force_init: true
+      project_path: './'
+      state: present
+  - name: Configure local alias
+    blockinfile:
+      path: ~/.bashrc
+      state: present
+      block: |
+        alias bastion='ssh -i ~/.ssh/lab_rsa azureadmin@`terraform output -raw bastion_ip`'
+        alias tunnel-0='ssh -L 8080:10.0.0.6:9664 -i ~/.ssh/lab_rsa azureadmin@`terraform output -raw bastion_ip`'
+        alias tunnel-1='ssh -L 8080:10.0.0.7:9664 -i ~/.ssh/lab_rsa azureadmin@`terraform output -raw bastion_ip`'
+        ANSIBLE_STDOUT_CALLBACK=debug
+  - name: Terraform refresh
+    shell: terraform refresh ; . ~/.bashrc
+
+- name: Push SSH key to bastion
+  hosts: bastion
+  remote_user: azureadmin
+  become: yes
+  tasks:
+  - name: Push SSH azureadmin private key
+    copy:
+      src: ~/.ssh/lab_rsa
+      dest: /home/azureadmin/.ssh/id_rsa
+      mode: '0600'
+      owner: azureadmin
+      group: users
+  - name: Configure etc hosts
+    blockinfile:
+      path: /etc/hosts
+      state: present
+      block: |
+        # IP address of the load balancer frontend configuration for NFS
+        10.0.0.4 nw1-nfs
+        10.0.0.5 nw2-nfs
+        # NFS cluster nodes
+        10.0.0.6 nfs-0
+        10.0.0.7 nfs-1
+        # SBD nodes
+        10.0.0.17 sbd-0
+        10.0.0.18 sbd-1
+        10.0.0.19 sbd-2
+
+- name: Push SSH config
+  hosts: all
+  debugger: on_failed
+  remote_user: azureadmin
+  tasks:
+  - name: Push SSH config to all VMs
+    copy:
+      src: ssh.config/ssh.config
+      dest: /home/azureadmin/.ssh/config
+      owner: azureadmin
+      group: users
+
+- name: Push root SSH keys to nfs hosts
+  hosts: nfs
+  remote_user: azureadmin
+  become: yes
+  tasks:
+  - name: Create /root/.ssh directory
+    file:
+      path: /root/.ssh/
+      state: directory
+      mode: '0700'
+  - name: Copy root private key
+    copy:
+      src: ~/.ssh/lab_rsa
+      dest: /root/.ssh/id_rsa
+      owner: root
+      group: root
+      mode: '0600'
+  - name: Copy root public key to authorized keys
+    copy:
+      src: ~/.ssh/lab_rsa.pub
+      dest: /root/.ssh/authorized_keys
+      owner: root
+      group: root
+      mode: '0644'
+  - name: Copy root public key to .ssh
+    copy:
+      src: ~/.ssh/lab_rsa.pub
+      dest: /root/.ssh/id_rsa.pub
+      owner: root
+      group: root
+      mode: '0644'

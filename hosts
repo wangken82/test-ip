@@ -1,0 +1,16 @@
+[all:vars]
+ansible_ssh_common_args='-i ~/.ssh/lab_rsa -o ProxyCommand="ssh -W %h:%p -i ~/.ssh/lab_rsa azureadmin@`terraform output -raw bastion_ip`"'
+ansible_ssh_private_key_file=~/.ssh/lab_rsa
+ansible_python_interpreter=/usr/bin/python
+
+[bastion]
+bastion-node ansible_host=10.0.0.100
+
+[sbd]
+sbd-node0 ansible_host=10.0.0.17 
+sbd-node1 ansible_host=10.0.0.18
+sbd-node2 ansible_host=10.0.0.19
+
+[nfs]
+nfs-node0 ansible_host=10.0.0.6 initiator_config=node0.initiator.config
+nfs-node1 ansible_host=10.0.0.7 initiator_config=node1.initiator.config
